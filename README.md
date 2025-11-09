@@ -1,0 +1,26 @@
+### Authors
+
+ - Nuno Peixoto   (A93244)
+ - Luís Ferreira  (A98286)
+ - Salomé Faria   (A108487)
+
+# Setup
+
+Start by cloning this repository, and creating a Python virtual environment:
+
+```
+$ git@github.com:faria-s/CC.git
+$ python -m venv .venv
+```
+
+To run the project, start by running:
+
+```
+$ source .venv/bin/activate
+```
+
+To run the server and the agent, run, respectively:
+
+```
+$ python -m mothership-server <missions_json> <database>
+$ python -m rover <server_ip>

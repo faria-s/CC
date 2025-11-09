@@ -1,0 +1,21 @@
+# Bad code editors
+.code
+
+# Python virtual environment
+.venv
+
+# Python bytecode
+**/__pycache__/
+
+# Python distribution
+*.egg-info/
+build/
+dist/
+bin/
+lib/__pycache__/
+
+# mypy
+.mypy_cache/
+
+# Database
+*.sqlite3
