@@ -5,5 +5,5 @@ from .structs.RegisterRoverResponse import RegisterRoverResponse
 
 from .MissionLink import MissionLink
 
-MISSIONLINK_DFAULT_PORT = 9999
+MISSIONLINK_DEFAULT_PORT = 9999
 TELEMETRY_DFAULT_PORT = 9999

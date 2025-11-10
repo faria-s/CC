@@ -7,7 +7,7 @@ from .Database import Database
 from lib import MissionLink
 
 
-from lib import (MISSIONLINK_DFAULT_PORT, TELEMETRY_DFAULT_PORT)
+from lib import (MISSIONLINK_DEFAULT_PORT, TELEMETRY_DFAULT_PORT)
 
 SERVER_IP = "0.0.0.0"
 
@@ -60,7 +60,9 @@ def main(argv: list[str]) -> None:
         )
         log(f"Mission {mission.mission_id} inserted successfully")
 
-    missionLink = MissionLink(SERVER_IP, MISSIONLINK_DFAULT_PORT)
+    missionLink = MissionLink(SERVER_IP, MISSIONLINK_DEFAULT_PORT)
+    missionLink.add_missions(missions)
+
     missionLink_thread = Thread(target=missionLink.start,daemon=True)
     missionLink_thread.start()
 

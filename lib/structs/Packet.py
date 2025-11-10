@@ -17,7 +17,7 @@ class Packet():
     '''
     Base class for packets with utility methods for checksum calculation and validation.
     '''
-    def __init__(self, packet_type: PacketType, sequence_number: Optional[int] = None, ack_number: Optional[int] = None ):
+    def __init__(self, packet_type: PacketType, sequence_number: Optional[int] = None, ack_number: Optional[int] = None, body: Optional[bytes] = None):
         '''
         Initializes a generic packet.
 
@@ -29,18 +29,22 @@ class Packet():
         self.__packet_type = packet_type
         self.__sequence_number = sequence_number or random.randint(0, 2**32 - 1)
         self.__ack_number = ack_number or (self.__sequence_number + 1)
+        self.__body = body
 
 
     def serialize(self) -> bytes:
-        packet_type_bytes = struct.pack('>B', self.__packet_type.value)   # 1 byte for type
-        sequence_number_bytes = struct.pack('>I', self.__sequence_number) # 4 bytes, big-endian unsigned int
-        ack_number_bytes = struct.pack('>I', self.__ack_number)           # 4 bytes, big-endian unsigned int
+        packet_type_bytes = struct.pack('>B', self.__packet_type.value)
+        sequence_number_bytes = struct.pack('>I', self.__sequence_number)
+        ack_number_bytes = struct.pack('>I', self.__ack_number)
 
-        return b''.join([
-            packet_type_bytes,
-            sequence_number_bytes,
-            ack_number_bytes,
-        ])
+        parts = [packet_type_bytes, sequence_number_bytes, ack_number_bytes]
+
+        if self.__body is not None:
+            if not isinstance(self.__body, (bytes, bytearray)):
+                raise TypeError("Packet body must be bytes or None")
+            parts.append(self.__body)
+
+        return b''.join(parts)
 
 
     def __repr__(self) -> str:
@@ -62,3 +66,7 @@ class Packet():
     @property
     def packet_type(self):
         return self.__packet_type
+
+    @property
+    def body(self):
+        return self.__body

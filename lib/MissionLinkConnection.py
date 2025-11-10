@@ -1,6 +1,7 @@
 import time
 
 from .structs.Packet import Packet, PacketType
+from .structs.RegisterRoverResponse import RegisterRoverResponse
 from .structs.ACK import Ack
 from .structs.EndConnection import EndConnection
 from logging import log
@@ -37,21 +38,25 @@ class MissionLinkConnection:
         # RTT
 
 
-    def handle_received_ack(self, ack: Packet) -> list[Packet]:
+
+    def handle_received_ack(self, ack: Packet):
 
         if ack.ack_number in self.__sent_not_acknowledge:
             del self.__sent_not_acknowledge[ack.ack_number]
             self.__sent_packets -= 1
 
-        return self.get_sendable_packets()
 
 
-    def handle_sendable_ack(self, mission: Packet) -> "Ack":
-        seq_number, ack_number = self.__update_seq_ack_number(mission)
+    def handle_sendable_register_response(self, response: Packet) -> "RegisterRoverResponse":
+        seq_number, ack_number = self.__update_seq_ack_number(response)
+        return RegisterRoverResponse(seq_number,ack_number)
+
+    def handle_sendable_ack(self, response: Packet) -> "Ack":
+        seq_number, ack_number = self.__update_seq_ack_number(response)
         return Ack(seq_number,ack_number)
         
-    def handle_sendable_end_connection(self, mission: Packet) -> "EndConnection":
-        seq_number, ack_number = self.__update_seq_ack_number(mission)
+    def handle_sendable_end_connection(self, response: Packet) -> "EndConnection":
+        seq_number, ack_number = self.__update_seq_ack_number(response)
         return EndConnection(seq_number,ack_number)
 
     def get_sendable_packets(self) -> list[Packet]:
@@ -78,3 +83,15 @@ class MissionLinkConnection:
     def add_sent_not_acked(self, ack_number: int,packet: Packet):
         self.__sent_not_acknowledge[ack_number] = Packet
 
+
+    def add_packet_to_send(self, packet: Packet) -> bool:
+
+        try:
+            self.__not_sent.append(packet)
+            return True
+
+        except Exception as e:
+            log(e, "Error")
+            return False
+
+    
