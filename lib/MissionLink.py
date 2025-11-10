@@ -2,6 +2,8 @@
 
 import socket
 from threading import Condition, Thread
+from collections import deque
+from typing import Optional
 
 from .structs.Packet import Packet, PacketType
 from .structs.RegisterRover import RegisterRover
@@ -13,7 +15,6 @@ from .MissionLinkConnection import MissionLinkConnection, MissionLinkConnectionE
 
 from .logging import log
 
-from typing import Optional
 
 
 class MissionLinkRuntimeException(Exception):
@@ -38,7 +39,7 @@ class MissionLink:
             self.__socket.bind(('0.0.0.0', port))
         self.__is_running = False
 
-        self.__missions_to_send: list[Mission] = []
+        self.__missions_to_send: deque[Mission] = deque()
         self.__missions_being_done: list[Mission] = []
 
         #Current active connections with rovers (str): rover ip
@@ -75,8 +76,6 @@ class MissionLink:
                         daemon=True
                     ).start()
 
-                    if mission:
-                        received_missions.append(mission)
                         
                 except KeyboardInterrupt:
                     log("Server interrupted manually. Stopping.", "INFO")
@@ -142,6 +141,8 @@ class MissionLink:
             received_packet = self.handle_packet_deserialize(message)
             message = ""
                     
+            # for mission in self.__missions_to_send:
+            #     print(mission)
 
             # Initializing connection
             if self.__is_server and isinstance(received_packet,RegisterRover):
@@ -172,30 +173,17 @@ class MissionLink:
                 connection = self.__connections[host]
                 response = connection.handle_received_ack(received_packet,)
 
-                if not connection.has_mission and self.__missions_to_send:
-                    mission = self.__missions_to_send.pop(0)
-                    self.__missions_to_send.append(mission)
+                if (not connection.has_mission) and self.__missions_to_send:
+                    mission = self.__missions_to_send.popleft()
+                    self.__missions_being_done.append(mission)
                     seq, ack = connection.update_seq_ack_number(received_packet)
 
                     packet = Packet(PacketType.Mission, seq, ack, mission.serialize())
                     connection.add_packet_to_send(packet)
-                    connection.set_has_mission = True
+                    connection.set_has_mission(True)
 
                     message = f"Sending Seq={packet.ack_number} to {host}:{port}"
 
-            elif isinstance(received_packet, Packet):
-
-                mission_body = received_packet.body
-                mission = Mission.deserialize(mission_body)
-
-                connection = self.__connections[host]
-
-                ack = connection.handle_sendable_ack(received_packet)
-                connection.add_packet_to_send(ack)
-
-                message = f"Sending Ack={ack.ack_number} to {host}:{port}"
-
-                
             elif isinstance(received_packet, EndConnection):
 
                 connection = self.__connections[host]
@@ -211,6 +199,18 @@ class MissionLink:
 
                 message = f"Ending Connection with {host}:{port}"
                 
+            elif isinstance(received_packet, Packet):
+
+                mission_body = received_packet.body
+                mission = Mission.deserialize(mission_body)
+
+                connection = self.__connections[host]
+
+                ack = connection.handle_sendable_ack(received_packet)
+                connection.add_packet_to_send(ack)
+
+                message = f"Sending Ack={ack.ack_number} to {host}:{port}"
+
             else:
                 raise ValueError("Unknown packet type.")
                 return 
@@ -234,6 +234,7 @@ class MissionLink:
         try:
             if packets:
                 for packet in packets:
+
                     self.send_packet(packet.serialize(), address)
 
         except Exception as e:
