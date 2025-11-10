@@ -56,7 +56,7 @@ def main(argv: list[str]) -> None:
             task=mission.task,
             duration=mission.duration,
             report_time=mission.report_time,
-            # state=mission.state
+            state=mission.state.value
         )
         log(f"Mission {mission.mission_id} inserted successfully")
 

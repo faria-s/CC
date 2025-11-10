@@ -38,7 +38,8 @@ class MissionLink:
             self.__socket.bind(('0.0.0.0', port))
         self.__is_running = False
 
-        self.__missions: list[Mission] = []
+        self.__missions_to_send: list[Mission] = []
+        self.__missions_being_done: list[Mission] = []
 
         #Current active connections with rovers (str): rover ip
         self.__clients_addr: dict[str,tuple[str,int]] = {}
@@ -114,7 +115,7 @@ class MissionLink:
                 return RegisterRoverResponse.deserialize(data)
 
             case PacketType.Mission:
-                return Mission.deserialize(data)
+                return Packet.deserialize(data)
 
             case PacketType.Ack:
                 return Ack.deserialize(data)
@@ -169,9 +170,23 @@ class MissionLink:
             elif isinstance(received_packet, Ack):
 
                 connection = self.__connections[host]
-                connection.handle_received_ack(received_packet)
+                response = connection.handle_received_ack(received_packet,)
 
-            elif isinstance(received_packet, Mission):
+                if not connection.has_mission and self.__missions_to_send:
+                    mission = self.__missions_to_send.pop(0)
+                    self.__missions_to_send.append(mission)
+                    seq, ack = connection.update_seq_ack_number(received_packet)
+
+                    packet = Packet(PacketType.Mission, seq, ack, mission.serialize())
+                    connection.add_packet_to_send(packet)
+                    connection.set_has_mission = True
+
+                    message = f"Sending Seq={packet.ack_number} to {host}:{port}"
+
+            elif isinstance(received_packet, Packet):
+
+                mission_body = received_packet.body
+                mission = Mission.deserialize(mission_body)
 
                 connection = self.__connections[host]
 
@@ -227,30 +242,6 @@ class MissionLink:
 
 
 
-    def send_ack(self, ack: Ack, client_address: tuple[str,int]):
-        try:
-            log(f"Sending ACK={packet.ack_number}")
-            self.send_packet(ack,client_address)
-        except Exception as e:
-            log(e, "Error")
-
-
-    def send_missions(self, client_address: tuple[str,int]):
-        host, port = client_address
-
-        try:
-            if self.__missions:
-                for mission in self.__missions:
-
-                    
-                    packet = Packet(PacketType.Mission,mission.serialize())
-                    log(f"Sending Pakcet Seq={packet.sequence_number}")
-                    self.send_packet(packet.serialize(), client_address)
-
-        except MissionLinkConnectionException:
-            pass
-    
-
     def request_connection(self,server_address: tuple[int,str]):
         host,port = server_address
 
@@ -269,4 +260,4 @@ class MissionLink:
 
         if missions:
             for mission in missions:
-                self.__missions.append(Mission)
+                self.__missions_to_send.append(mission)

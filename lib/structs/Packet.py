@@ -46,6 +46,42 @@ class Packet():
 
         return b''.join(parts)
 
+    @classmethod
+    def deserialize(cls, data: bytes) -> "Packet":
+        """
+        Deserialize bytes into a Packet instance.
+
+        Args:
+            data (bytes): Serialized packet data.
+
+        Returns:
+            Packet: The reconstructed Packet object.
+        """
+        try:
+            if len(data) < 9:
+                raise SerializationException("Data too short to be a valid Packet")
+
+            # 1 byte: packet type
+            packet_type_value = struct.unpack_from('>B', data, 0)[0]
+            try:
+                packet_type = PacketType(packet_type_value)
+            except ValueError:
+                raise SerializationException(f"Invalid packet type: {packet_type_value}")
+
+            # 4 bytes: sequence number
+            sequence_number = struct.unpack_from('>I', data, 1)[0]
+
+            # 4 bytes: ack number
+            ack_number = struct.unpack_from('>I', data, 5)[0]
+
+            # Remaining bytes: body
+            body = data[9:] if len(data) > 9 else None
+
+            return cls(packet_type, sequence_number, ack_number, body)
+
+        except (struct.error, IndexError) as e:
+            raise SerializationException("Failed to deserialize Packet") from e
+
 
     def __repr__(self) -> str:
         return (

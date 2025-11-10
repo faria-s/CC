@@ -35,28 +35,36 @@ class MissionLinkConnection:
         self.__sent_packets = 0                             # Number of packets sent, waiting for ack response
         self.__messages_removed_from_receive_queue = 0
 
+        self.__has_mission: bool = False
+
         # RTT
 
 
 
-    def handle_received_ack(self, ack: Packet):
+    def handle_received_ack(self, ack: Packet) -> bool:
 
-        if ack.ack_number in self.__sent_not_acknowledge:
-            del self.__sent_not_acknowledge[ack.ack_number]
-            self.__sent_packets -= 1
+        try:
+            if ack.ack_number in self.__sent_not_acknowledge:
+                del self.__sent_not_acknowledge[ack.ack_number]
+                self.__sent_packets -= 1
+                return True
+
+        except Exception as e:
+            log(e)
+            return False
 
 
 
     def handle_sendable_register_response(self, response: Packet) -> "RegisterRoverResponse":
-        seq_number, ack_number = self.__update_seq_ack_number(response)
+        seq_number, ack_number = self.update_seq_ack_number(response)
         return RegisterRoverResponse(seq_number,ack_number)
 
     def handle_sendable_ack(self, response: Packet) -> "Ack":
-        seq_number, ack_number = self.__update_seq_ack_number(response)
+        seq_number, ack_number = self.update_seq_ack_number(response)
         return Ack(seq_number,ack_number)
         
     def handle_sendable_end_connection(self, response: Packet) -> "EndConnection":
-        seq_number, ack_number = self.__update_seq_ack_number(response)
+        seq_number, ack_number = self.update_seq_ack_number(response)
         return EndConnection(seq_number,ack_number)
 
     def get_sendable_packets(self) -> list[Packet]:
@@ -74,7 +82,7 @@ class MissionLinkConnection:
             return ready_to_be_sent
 
 
-    def __update_seq_ack_number(self,packet: Packet) -> (int,int):
+    def update_seq_ack_number(self,packet: Packet) -> (int,int):
         seq_number = packet.sequence_number + 1
         ack_number = packet.ack_number + 1
 
@@ -95,3 +103,9 @@ class MissionLinkConnection:
             return False
 
     
+    @property
+    def has_mission(self):
+        return self.__has_mission
+    
+    def set_has_mission(self, value: bool):
+        self.__has_mission = value

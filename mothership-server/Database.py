@@ -25,46 +25,50 @@ class Database:
             self.__connection = sqlite3.connect(path)
             cursor = self.__connection.cursor()
 
+            # Added "state" column (INTEGER, because it maps to MissionState.value)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS missions (
-                            mission_id TEXT NOT NULL,
-                            area TEXT NOT NULL,
-                            task TEXT NOT NULL,
-                            duration REAL,
-                            report_time REAL
+                    mission_id TEXT NOT NULL,
+                    area TEXT NOT NULL,
+                    task TEXT NOT NULL,
+                    duration REAL,
+                    report_time REAL,
+                    state INTEGER NOT NULL
                 )
             ''')
 
             self.__connection.commit()
 
-            log("Missions Table and database started successfully.")
+            log("Missions table and database started successfully.")
 
         except sqlite3.Error as e:
-                    raise DatabaseException("Failed to initialize database") from e
+            raise DatabaseException("Failed to initialize database") from e
 
     def insert_mission(self,
                        mission_id: str,
-                       area: list[tuple[float, float], tuple[float, float]],
+                       area: list[tuple[float, float]],
                        task: str,
                        duration: int,
-                       report_time: int) -> None:
-                       # state: int) -> None:
-        """Insert a mission into the missions table."""
+                       report_time: int,
+                       state: int) -> None:
+        """
+        Insert a mission into the missions table.
+        state: integer representing MissionState.value
+        """
         try:
             cursor = self.__connection.cursor()
 
             area_json = json.dumps(area)
 
             cursor.execute('''
-                INSERT INTO missions (mission_id, area, task, duration, report_time)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (mission_id, area_json, task, duration, report_time))
+                INSERT INTO missions (mission_id, area, task, duration, report_time, state)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (mission_id, area_json, task, duration, report_time, state))
 
             self.__connection.commit()
 
         except sqlite3.Error as e:
             raise DatabaseException("Failed to insert mission") from e
-
 
     def fetch_all_missions(self) -> list[tuple]:
         """Fetch all missions (raw tuples)."""
@@ -76,7 +80,7 @@ class Database:
             missions = []
             for mission_id, area_json, task, duration, report_time, state in rows:
                 area = json.loads(area_json)
-                missions.append((mission_id, area, task, duration, report_time))
+                missions.append((mission_id, area, task, duration, report_time, state))
 
             return missions
 
