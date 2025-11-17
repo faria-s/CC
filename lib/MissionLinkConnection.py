@@ -51,6 +51,11 @@ class MissionLinkConnection:
         self.__retransmission_thread = None
         self.__thread_lock = threading.Lock()
 
+        # Max retransmission handle
+        self.__retransmission_count: dict[int, int] = {}
+        self.__max_retransmissions = 5
+        self.__failed = False
+
     def handle_received_ack(self, ack: Packet) -> bool:
         try:
             ack_num = ack.sequence_number
@@ -63,6 +68,10 @@ class MissionLinkConnection:
                 sample_rtt = time.time() - send_time
 
                 self.update_rtt_estimates(sample_rtt)
+
+            # clear retransmission count if successfully acknowledged
+            if ack_num in self.__retransmission_count:
+                del self.__retransmission_count[ack_num]
 
             return True
 
@@ -194,18 +203,34 @@ class MissionLinkConnection:
                     )
 
                     if now - send_time > timeout:
-                        socket.sendto(packet.serialize(), client_address)
+                        # retransmit
+                        try:
+                            self.__socket.sendto(packet.serialize(), client_address)
+                        except Exception:
+                            pass
+
                         self.__send_times[ack_num] = time.time()
 
-                        self.__rtt_avg_estimate = (
-                            self.__rtt_avg_estimate * RETRANSMISSION_PENALIZATION
-                            if self.__rtt_avg_estimate
-                            else INITIAL_TIMEOUT
-                        )
+                        # Update retransmission count
+                        prev = self.__retransmission_count.get(ack_num, 0)
+                        self.__retransmission_count[ack_num] = prev + 1
 
-                        print(
-                            f"[RETRANSMIT] Packet Seq={packet.sequence_number} to {client_address}, timeout={timeout:.3f}s"
-                        )
+                        print(f"[RETRANSMIT] Seq={packet.sequence_number} to {client_address}, timeout={timeout:.3f}s (try={self.__retransmission_count.get(ack_num,0)+1})")
+
+                        # STOP if exceeded retry limit
+                        if self.__retransmission_count[ack_num] >= self.__max_retransmissions:
+                            print(f"[FAIL] Max retries reached for Seq={packet.sequence_number}. Closing connection.")
+
+                            # Send EndConnection packet
+                            try:
+                                end_packet = EndConnection(packet.sequence_number + 1, packet.ack_number + 1)
+                                socket.sendto(end_packet.serialize(), client_address)
+                            except Exception:
+                                pass
+
+                            self.__failed = True
+                            self.__running = False
+                            return
 
                 time.sleep(MINIMUM_TIMEOUT)
 
@@ -251,3 +276,7 @@ class MissionLinkConnection:
 
     def set_has_mission(self, value: bool):
         self.__has_mission = value
+
+    @property
+    def failed(self):
+        return self.__failed

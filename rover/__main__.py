@@ -5,7 +5,6 @@ from threading import Thread
 from lib import (MISSIONLINK_DEFAULT_PORT,TELEMETRY_DFAULT_PORT, MissionLink)
 
 
-
 def main(argv: list[str]) -> None:
 
     if len(argv) != 2:
@@ -13,7 +12,7 @@ def main(argv: list[str]) -> None:
         sys.exit(1)
 
     server_address = argv[1]
-    address = (server_address,MISSIONLINK_DEFAULT_PORT)
+    address = (server_address, MISSIONLINK_DEFAULT_PORT)
 
     missions = []
 
@@ -21,6 +20,7 @@ def main(argv: list[str]) -> None:
     missionLink_thread = Thread(target=missionLink.start,args=(address,),daemon=False)
     missionLink_thread.start()
 
+    missionLink_thread.join()
 
 if __name__ == '__main__':
     main(sys.argv)
