@@ -76,12 +76,20 @@ class MissionLink:
                     args=(message, client_address, missions),
                     daemon=True,
                 ).start()
-
+            except OSError:
+                # socket closed -> exit loop cleanly
+                break
             except KeyboardInterrupt:
                 log("Server interrupted manually. Stopping.", "INFO")
                 self.stop()
             except Exception as e:
                 log(f"{e}", "ERROR")
+
+        # ensure socket closed
+        try:
+            self.__socket.close()
+        except Exception:
+            pass
 
     def stop(self):
         """
@@ -143,6 +151,15 @@ class MissionLink:
             received_packet = self.handle_packet_deserialize(packet_received)
             message: str = ""
 
+            # If connection exists but has failed, remove it
+            if host in self.__connections:
+                connection = self.__connections[host]
+                if connection.failed:
+                    log(f"[DISCONNECT] Rover {host} timed out due to retransmission failures.")
+                    connection.stop_retransmission_thread()
+                    del self.__connections[host]
+                    return
+
             # Initializing connection
             if self.__is_server and isinstance(received_packet, RegisterRover):
                 if host not in self.__clients_addr:
@@ -186,15 +203,35 @@ class MissionLink:
                     message = f"Received Ack={received_packet.sequence_number} from {host}:{port}"
 
             elif isinstance(received_packet, EndConnection):
-                connection = self.__connections[host]
-                ack = connection.handle_sendable_ack(received_packet)
-                connection.add_packet_to_send(ack)
+                connection = self.__connections.get(host)
+                if self.__is_server:
+                    # server simply ACKs and removes connection
+                    if connection:
+                        ack = connection.handle_sendable_ack(received_packet)
+                        connection.add_packet_to_send(ack)
+                        connection.stop_retransmission_thread()
+                        del self.__connections[host]
+                    message = f"Ending Connection with {host}:{port}"
+                else:
+                    # rover/client: acknowledge, stop retransmission
+                    log(f"[ROVER] Received EndConnection from {host}:{port}")
+                    if connection:
+                        ack = connection.handle_sendable_ack(received_packet)
+                        connection.add_packet_to_send(ack)
+                        # send any pending packets ack back
+                        packets = connection.get_sendable_packets()
+                        self.send_packets(packets, client_address)
+                        connection.stop_retransmission_thread()
 
-                connection.stop_retransmission_thread()
-                del self.__connections[host]
+                        if host in self.__connections:
+                            del self.__connections[host]
 
-                message = f"Ending Connection with {host}:{port}"
-
+                    # close the socket and stop the main loop so start() exits
+                    self.__socket.close()
+                    self.__is_running = False
+                    log("[ROVER] Connection closed.")
+                    return
+                
             elif isinstance(received_packet, Packet):
                 mission_body = received_packet.body
 
