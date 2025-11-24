@@ -19,3 +19,5 @@ lib/__pycache__/
 
 # Database
 *.sqlite3
+
+.xml
