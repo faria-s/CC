@@ -5,7 +5,7 @@ from lib.logging import log
 from .Parser import Parser
 from .Database import Database
 from lib import MissionLink
-
+from lib import TelemetryStreamServer
 
 from lib import (MISSIONLINK_DEFAULT_PORT, TELEMETRY_DFAULT_PORT)
 
@@ -66,7 +66,13 @@ def main(argv: list[str]) -> None:
     missionLink_thread = Thread(target=missionLink.start,daemon=True)
     missionLink_thread.start()
 
+    #telemetry_server = TelemetryStreamServer(SERVER_IP, TELEMETRY_DFAULT_PORT)
+
+    #telemetry_thread = Thread(target=telemetry_server.start_stream, daemon=True)
+    #telemetry_thread.start()
+
     missionLink_thread.join()
+    #telemetry_thread.join()
     database.close()
     
 

@@ -4,10 +4,10 @@ from enum import Enum
 from typing import Optional
 
 
-
 class PacketType(Enum):
     RegisterRover = 0
     RegisterRoverResponse = 1
+    Telemetry = 2
     Mission = 3
     Report = 4
     Ack = 5
@@ -106,3 +106,4 @@ class Packet():
     @property
     def body(self):
         return self.__body
+    
