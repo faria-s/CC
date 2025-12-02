@@ -22,11 +22,10 @@ class MissionLinkConnectionException:
 
 
 class MissionLinkConnection:
-    def __init__(self, own_address: str, rover_id: str):
+    def __init__(self, own_address: str):
         current_time = time.time()
-
+        
         self.__own_address = own_address
-        self.__rover_id = rover_id
 
         # Incoming Data
         self.__received_queue: dict[int, Packet] = {}           # Packets received but not yet processed: dict[sequence_number,Packet]
@@ -72,10 +71,10 @@ class MissionLinkConnection:
             return False
 
     def handle_sendable_register_response(
-        self, response: Packet
+        self, response: Packet, rover_id: str
     ) -> "RegisterRoverResponse":
         seq_number, ack_number = self.update_seq_ack_number(response)
-        return RegisterRoverResponse(seq_number, ack_number, self.__rover_id)
+        return RegisterRoverResponse(seq_number, ack_number, rover_id)
 
     def handle_sendable_ack(self, response: Packet) -> "Ack":
         seq_number, ack_number = self.update_seq_ack_number(response)
@@ -252,10 +251,3 @@ class MissionLinkConnection:
 
     def set_has_mission(self, value: bool):
         self.__has_mission = value
-
-    @property
-    def rover_id(self):
-        return self.__rover_id
-
-    def set_rover_id(self, rover_id: str):
-        self.__rover_id = rover_id

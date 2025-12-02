@@ -47,7 +47,12 @@ class MissionLink:
 
         self.__condition = Condition()
 
-        self.__next_rover_id = 1  # rover id counter
+        self._rover_id: Optional[str] = None      # Only on rover
+        self.__next_rover_id = 1                  # rover id counter
+
+    @property
+    def rover_id(self):
+        return self._rover_id
 
     def start(
         self,
@@ -155,24 +160,25 @@ class MissionLink:
                     self.__next_rover_id += 1
                     log(f"Assigned ID {rover_id} to {host}")
                     # CHANGED: Only create connection and start thread for NEW connections
-                    connection = self.__connections[host] = MissionLinkConnection(host, rover_id)
+                    connection = self.__connections[host] = MissionLinkConnection(host)
                     connection.start_retransmission_thread(
                         self.__socket, client_address
                     )
 
                 # Get existing connection (just created or already exists)
                 connection = self.__connections[host]
-                response = connection.handle_sendable_register_response(received_packet)
+                rover_id = f"rover_{self.__next_rover_id - 1}"
+                response = connection.handle_sendable_register_response(received_packet, rover_id)
                 connection.add_packet_to_send(response)
 
-                message = f"Server confirms connection with {host}:{port} (ID: {connection.rover_id})"
+                message = f"Server confirms connection with {host}:{port} (ID: {rover_id})"
 
             elif isinstance(received_packet, RegisterRoverResponse):
                 connection = self.__connections[host]
 
                 # Saves the rover id assigned by the server
-                connection.set_rover_id(received_packet.rover_id)
-                log(f"[ROVER] Assigned ID from server: {connection.rover_id}")
+                self._rover_id = received_packet.rover_id
+                log(f"[ROVER] Assigned ID from server: {self._rover_id}")
                 ack = connection.handle_sendable_ack(received_packet)
                 connection.add_packet_to_send(ack)
 
@@ -264,7 +270,7 @@ class MissionLink:
 
         self.__clients_addr[host] = server_address
 
-        connection = self.__connections[host] = MissionLinkConnection(host, rover_id=None)
+        connection = self.__connections[host] = MissionLinkConnection(host)
         connection.start_retransmission_thread(self.__socket, server_address)
 
         request_packet = RegisterRover()
