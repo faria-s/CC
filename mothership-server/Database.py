@@ -22,7 +22,7 @@ class Database:
 
     def __init__(self, path: str):
         try:
-            self.__connection = sqlite3.connect(path)
+            self.__connection = sqlite3.connect(path, check_same_thread=False)
             cursor = self.__connection.cursor()
 
             # Added "state" column (INTEGER, because it maps to MissionState.value)

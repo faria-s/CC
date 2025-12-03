@@ -5,6 +5,11 @@ from lib.logging import log
 from lib.structs.Mission import MissionState
 from lib.structs.Telemetry import Telemetry, OperationalStatus
 
+
+#curl http://10.0.2.15:8000/missions
+#curl http://10.0.2.15:8000/telemetry
+#curl http://10.0.2.15:8000/health
+
 # Tipos esperados:
 # - database: instância de mothership-server/Database.Database
 # - telemetry_server: instância de lib.TelemetryStream.TelemetryStreamServer
@@ -14,7 +19,7 @@ def telemetry_to_dict(t: Telemetry) -> dict[str, Any]:
     """Converte um objeto Telemetry num dicionário JSON-friendly."""
     return {
         "rover_id": t.get_rover_id,
-        "position": list(t.get_position),        # [x, y, z]
+        "position": list(t.get_position),       
         "battery_level": t.get_battery_level,
         "velocity": t.get_velocity,
         "operational_status": t.get_operational_status.name,
