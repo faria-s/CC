@@ -24,22 +24,25 @@ def main(argv: list[str]) -> None:
     missionLink_thread = Thread(target=missionLink.start,args=(address,),daemon=False)
     missionLink_thread.start()
 
-    while missionLink.rover_id is None:
-        time.sleep(0.1)
+    time.sleep(5)
+    print("\n")
 
+    missionLink._id_assigned_event.wait()  # blocks until ID is assigned
     print("Assigned rover ID:", missionLink.rover_id)
 
+    missionLink._missions_assigned_event.wait()  # blocks until at least one mission received
+    print("Missions received by rover:")
+    for mission in missionLink.received_missions:
+        print(mission)
+
     """
-    # Wait until rover_id is assigned by MissionLink
-    while missionLink.rover_id is None:
-        time.sleep(0.1)
     
     telemetry_client = TelemetryStreamClient(server_address, TELEMETRY_DFAULT_PORT)
     telemetry_client.connect()
     telem_thread = Thread(target=telemetry_loop, args=(telemetry_client, missionLink.rover_id), daemon=True)
     telem_thread.start()
     """
-    #missionLink_thread.join()
+    missionLink_thread.join()
     #telem_thread.join()
 
 if __name__ == '__main__':

@@ -64,6 +64,7 @@ class MissionLinkConnection:
 
                 self.update_rtt_estimates(sample_rtt)
 
+            self.set_has_mission(False) # keep sending missions
             return True
 
         except Exception as e:
