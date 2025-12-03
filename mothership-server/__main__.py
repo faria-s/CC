@@ -9,6 +9,8 @@ from lib import TelemetryStreamServer
 
 from lib import (MISSIONLINK_DEFAULT_PORT, TELEMETRY_DFAULT_PORT)
 
+from .ObservationAPI import run_api
+
 SERVER_IP = "0.0.0.0"
 
 '''
@@ -70,7 +72,13 @@ def main(argv: list[str]) -> None:
 
     #telemetry_thread = Thread(target=telemetry_server.start_stream, daemon=True)
     #telemetry_thread.start()
-
+    
+    api_thread = Thread(
+        target=run_api,
+        args=(database, telemetry_server, SERVER_IP, 8000),
+        daemon=True,
+    )
+    api_thread.start()
     missionLink_thread.join()
     #telemetry_thread.join()
     database.close()

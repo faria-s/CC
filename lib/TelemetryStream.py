@@ -143,6 +143,10 @@ class TelemetryStreamServer:
 
                 telemetry = Telemetry.deserialize(data)
 
+                # Guarda a última telemetria por rover_id
+                with self.lock:
+                    self.telemetry_data[telemetry.get_rover_id] = telemetry
+
                 log(
                     f"[TELEMETRY SERVER] Received telemetry from Rover[{telemetry.get_rover_id}]: {telemetry}",
                     "Info",
