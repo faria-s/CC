@@ -9,36 +9,9 @@ from lib import TelemetryStreamServer
 
 from lib import (MISSIONLINK_DEFAULT_PORT, TELEMETRY_DFAULT_PORT)
 
-from .ObservationAPI import run_api
+#from .ObservationAPI import run_api
 
 SERVER_IP = "0.0.0.0"
-
-'''
-def handle_missionLink_message(missions: dict[str, list[MessageTask]],
-                           database: Database,
-                           missionLink: MissionLink,
-                           message_bytes: bytes,
-                           agent: str) -> None:
-    try:
-        mission = Mission.deserialize(message_bytes)
-
-        if isinstance(mission, MessageTasksRequest):
-            if agent in tasks:
-                for task in tasks[agent]:
-                    missionLink.send(task.serialize(), agent)
-                print(f'Sent tasks to {agent}')
-            else:
-                print(f'Ignoring MessageTasksRequest from unknown agent {agent}',
-                      file=sys.stderr)
-                nettask.close(agent)
-        else:
-            database.register_task(agent, False, message)
-    except SerializationException as e:
-        print(f'Ignoring SerializationException: {e}', file=sys.stderr)
-    except DatabaseException as e:
-        print(f'Ignoring DatabaseException: {e}', file=sys.stderr)
-
-'''
 
 def main(argv: list[str]) -> None:
     if len(argv) != 3:
@@ -71,16 +44,15 @@ def main(argv: list[str]) -> None:
     telemetry_server = TelemetryStreamServer(SERVER_IP, TELEMETRY_DFAULT_PORT)
     telemetry_thread = Thread(target=telemetry_server.start_stream, daemon=True)
     telemetry_thread.start()
-
-    telemetry_thread = Thread(target=telemetry_server.start_stream, daemon=True)
-    telemetry_thread.start()
     
+    """
     api_thread = Thread(
         target=run_api,
         args=(database, telemetry_server, SERVER_IP, 8000),
         daemon=True,
     )
     api_thread.start()
+    """
     missionLink_thread.join()
     database.close()
 
