@@ -123,3 +123,15 @@ class Telemetry():
     @property
     def get_operational_status(self) -> OperationalStatus:
         return self._operational_status
+
+    def set_position(self, position: tuple[float, float, float]):
+            self._position = position
+
+    def set_battery_level(self, battery_level: float):
+        self._battery_level = battery_level
+
+    def set_velocity(self, velocity: float):
+        self._velocity = velocity
+        
+    def set_operational_status(self, status: OperationalStatus):
+        self._operational_status = status

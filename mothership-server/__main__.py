@@ -66,15 +66,12 @@ def main(argv: list[str]) -> None:
     missionLink_thread = Thread(target=missionLink.start,daemon=True)
     missionLink_thread.start()
 
-    #telemetry_server = TelemetryStreamServer(SERVER_IP, TELEMETRY_DFAULT_PORT)
-
-    #telemetry_thread = Thread(target=telemetry_server.start_stream, daemon=True)
-    #telemetry_thread.start()
+    telemetry_server = TelemetryStreamServer(SERVER_IP, TELEMETRY_DFAULT_PORT)
+    telemetry_thread = Thread(target=telemetry_server.start_stream, daemon=True)
+    telemetry_thread.start()
 
     missionLink_thread.join()
-    #telemetry_thread.join()
     database.close()
-    
 
 if __name__ == '__main__':
     main(sys.argv)
