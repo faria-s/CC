@@ -193,6 +193,9 @@ class TelemetryStreamServer:
                 )
                 t.start()
                 self.client_threads.append(t)
+            except KeyboardInterrupt:
+                self.stop_server()
+
             except Exception as e:
                 log(f"Error accepting connection: {e}.")
 
@@ -226,8 +229,13 @@ class TelemetryStreamServer:
 
                 log(f"[TELEMETRY SERVER] Received telemetry from Rover[{telemetry.get_rover_id}]: {telemetry}", "Info")
 
+        except KeyboardInterrupt:
+            log("Server interrupted manually. Stopping.", "INFO")
+            self.stop_server()
+
         except Exception as e:
             log(f"[TELEMETRY SERVER] Connection with {client_addr} ended: {e}", "Error")
+
         finally:
             client_sock.close()
 

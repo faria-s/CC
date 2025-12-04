@@ -173,70 +173,76 @@ class MissionLink:
 
                 message = f"Server confirms connection with {host}:{port} (ID: {rover_id})"
 
-            elif isinstance(received_packet, RegisterRoverResponse):
+
+            else: 
                 connection = self.__connections[host]
 
-                # Saves the rover id assigned by the server
-                self._rover_id = received_packet.rover_id
-                self._id_assigned_event.set()  # signal that ID is assigned
-                log(f"[ROVER] Assigned ID from server: {self._rover_id}")
-                ack = connection.handle_sendable_ack(received_packet)
-                connection.add_packet_to_send(ack)
+                if (isinstance(received_packet, EndConnection) or not(connection.running)):
+                    ack = connection.handle_sendable_ack(received_packet)
+                    connection.add_packet_to_send(ack)
 
-                message = f"Sending Ack={ack.sequence_number} to {host}:{port}"
+                    connection.stop_retransmission_thread()
+                    del self.__connections[host]
 
-            elif isinstance(received_packet, Ack):
-                connection = self.__connections[host]
-                connection.handle_received_ack(received_packet)
+                    message = f"Ending Connection with {host}:{port}"
 
-                if (not connection.has_mission) and self.__missions_to_send:
-                    mission = self.__missions_to_send.popleft()
-                    self.__missions_being_done[host] = mission
-                    seq, ack = connection.update_seq_ack_number(received_packet)
+                elif isinstance(received_packet, RegisterRoverResponse):
 
-                    packet = Packet(PacketType.Mission, seq, ack, mission.serialize())
-                    connection.add_packet_to_send(packet)
-                    connection.set_has_mission(True)
+                    # Saves the rover id assigned by the server
+                    self._rover_id = received_packet.rover_id
+                    self._id_assigned_event.set()  # signal that ID is assigned
+                    log(f"[ROVER] Assigned ID from server: {self._rover_id}")
+                    ack = connection.handle_sendable_ack(received_packet)
+                    connection.add_packet_to_send(ack)
 
-                    message = f"Sending Seq={packet.sequence_number} to {host}:{port}"
+                    message = f"Sending Ack={ack.sequence_number} to {host}:{port}"
+
+                elif isinstance(received_packet, Ack):
+
+                    try:
+                        connection.handle_received_ack(received_packet)
+
+                        if (not connection.has_mission) and self.__missions_to_send:
+                            mission = self.__missions_to_send.popleft()
+                            self.__missions_being_done[host] = mission
+                            seq, ack = connection.update_seq_ack_number(received_packet)
+
+                            packet = Packet(PacketType.Mission, seq, ack, mission.serialize())
+                            connection.add_packet_to_send(packet)
+                            connection.set_has_mission(True)
+
+                            message = f"Received Ack={received_packet.sequence_number} from {host}:{port}; Sending Seq={packet.sequence_number} to {host}:{port}"
+                        else:
+                            message = f"Received Ack={received_packet.sequence_number} from {host}:{port}"
+                    except KeyError:
+                        message = f"[ERROR] Received packet from unknown host: {host}:{port}"
+
+
+                elif isinstance(received_packet, Packet):
+                    mission_body = received_packet.body
+
+                    if mission_body:
+                        mission = Mission.deserialize(mission_body)
+                        self._received_missions.append(mission)
+                        self._missions_assigned_event.set() 
+                        log(f"Received mission: {mission}", "INFO")
+                    
+                    ack = connection.handle_sendable_ack(received_packet)
+                    connection.add_packet_to_send(ack)
+                    #connection.set_has_mission(False)
+
+                    message = f"Sending Ack={ack.sequence_number} to {host}:{port}"
+
                 else:
-                    message = f"Received Ack={received_packet.sequence_number} from {host}:{port}"
+                    raise ValueError("Unknown packet type.")
+                    return
 
-            elif isinstance(received_packet, EndConnection):
-                connection = self.__connections[host]
-                ack = connection.handle_sendable_ack(received_packet)
-                connection.add_packet_to_send(ack)
-
-                connection.stop_retransmission_thread()
-                del self.__connections[host]
-
-                message = f"Ending Connection with {host}:{port}"
-
-            elif isinstance(received_packet, Packet):
-                mission_body = received_packet.body
-
-                if mission_body:
-                    mission = Mission.deserialize(mission_body)
-                    self._received_missions.append(mission)
-                    self._missions_assigned_event.set() 
-                    log(f"Received mission: {mission}", "INFO")
-                
-                connection = self.__connections[host]
-                ack = connection.handle_sendable_ack(received_packet)
-                connection.add_packet_to_send(ack)
-                #connection.set_has_mission(False)
-
-                message = f"Sending Ack={ack.sequence_number} to {host}:{port}"
-
-            else:
-                raise ValueError("Unknown packet type.")
-                return
-
-            connection = self.__connections[host]
             packets = connection.get_sendable_packets()
             self.send_packets(packets, client_address)
             log(message)
 
+        except KeyError:
+            message = f"[ERROR] packet from unknown host: {host}:{port}"
         except Exception as e:
             log(f"Error handling packet from {client_address}: {e}", "ERROR")
 
@@ -288,6 +294,8 @@ class MissionLink:
             for mission in missions:
                 self.__missions_to_send.append(mission)
     
+
+
     @property
     def rover_id(self):
         return self._rover_id

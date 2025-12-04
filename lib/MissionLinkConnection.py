@@ -49,10 +49,13 @@ class MissionLinkConnection:
         self.__send_times: dict[int, float] = {}
         self.__running = False
         self.__retransmission_thread = None
+        self.__maxR = 5                                         # Max number of retransmits for the host to stop retransmiting and ending connection
+        self.__curretnR = 0                                     # Current number of retransmits
         self.__thread_lock = threading.Lock()
 
     def handle_received_ack(self, ack: Packet) -> bool:
         try:
+            self.__curretnR = 0
             ack_num = ack.sequence_number
             if ack_num in self.__sent_not_acknowledge:
                 del self.__sent_not_acknowledge[ack_num]
@@ -195,6 +198,14 @@ class MissionLinkConnection:
                     )
 
                     if now - send_time > timeout:
+
+                        self.__curretnR += 1
+
+                        if self.__curretnR > self.__maxR:
+                            self.__running = False
+                            log(f"Max retransmissions exceeded, ending connection with {client_address}", "END CONNECTION")
+                            break 
+
                         socket.sendto(packet.serialize(), client_address)
                         self.__send_times[ack_num] = time.time()
 
@@ -204,9 +215,7 @@ class MissionLinkConnection:
                             else INITIAL_TIMEOUT
                         )
 
-                        print(
-                            f"[RETRANSMIT] Packet Seq={packet.sequence_number} to {client_address}, timeout={timeout:.3f}s"
-                        )
+                        log(f"Packet Seq={packet.sequence_number} to {client_address}, timeout={timeout:.3f}s", "RETRANSMIT")
 
                 time.sleep(MINIMUM_TIMEOUT)
 
@@ -214,7 +223,6 @@ class MissionLinkConnection:
                 print(f"[Retransmission error] {e}")
                 break
 
-        print(f"[RETRANSMIT] Thread stopping for {client_address}")
 
     def stop_retransmission_thread(self):
         """Signals the retransmission loop to exit cleanly."""
@@ -246,6 +254,10 @@ class MissionLinkConnection:
     @property
     def sent_not_acknowledge(self):
         return self.__sent_not_acknowledge
+
+    @property
+    def running(self):
+        return self.__running
 
     def set_send_times(self, seq_number: int, time: float):
         self.__send_times[seq_number] = time
