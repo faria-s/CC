@@ -53,6 +53,8 @@ class MissionLink:
         self._rover_id: Optional[str] = None      # Only on rover
         self._missions_assigned_event = threading.Event()
 
+        self._total_sent_missions = 0
+        self._max_missions = 3
 
     def start(
         self,
@@ -202,9 +204,10 @@ class MissionLink:
                     try:
                         connection.handle_received_ack(received_packet)
 
-                        if (not connection.has_mission) and self.__missions_to_send:
+                        if (not connection.has_mission) and self.__missions_to_send and self._total_sent_missions < self._max_missions:
                             mission = self.__missions_to_send.popleft()
                             self.__missions_being_done[host] = mission
+                            self._total_sent_missions += 1 
                             seq, ack = connection.update_seq_ack_number(received_packet)
 
                             packet = Packet(PacketType.Mission, seq, ack, mission.serialize())
@@ -294,8 +297,6 @@ class MissionLink:
             for mission in missions:
                 self.__missions_to_send.append(mission)
     
-
-
     @property
     def rover_id(self):
         return self._rover_id

@@ -48,7 +48,6 @@ class TelemetryStreamClient:
 
         while not self._stop_event.is_set() and self.connected:
             self._mission_loop()
-            time.sleep(0.2) # update to a given frequency (from mission)
 
     def stop(self):
         """Stops loop and closes connection."""
@@ -74,8 +73,8 @@ class TelemetryStreamClient:
 
         mission = self.missions[self.current_mission_index]
 
-        # generates its own telemetry
-        if not self.current_telemetry:
+        # generates its own telemetry once
+        if self.current_telemetry is None:
             self.current_telemetry = self._generate_initial_telemetry()
 
         # given the mission updates its telemetry
@@ -83,11 +82,13 @@ class TelemetryStreamClient:
 
         self._send_current_telemetry()
 
-        # Check if current mission is finished and moves to the next one
+        # if finished then send final packet
         if self.current_telemetry.get_operational_status == OperationalStatus.FINISHED:
             log(f"[ROVER] Mission {mission._mission_id} finished", "Info")
             self.current_mission_index += 1
-            self.current_telemetry = None  # reset for next mission
+            return 
+
+        time.sleep(mission._report_time / 100) 
 
     def _generate_initial_telemetry(self) -> Telemetry:
         """Generates a random initial telemetry at the start of a mission."""
