@@ -1,22 +1,23 @@
+import signal
 import sys
 import time
 from socket import gethostname
 from threading import Thread
 
-from lib import (MISSIONLINK_DEFAULT_PORT,TELEMETRY_DFAULT_PORT, MissionLink)
-from lib.TelemetryStream import TelemetryStreamClient, Telemetry
+from lib import MISSIONLINK_DEFAULT_PORT, TELEMETRY_DFAULT_PORT, MissionLink
+from lib.TelemetryStream import Telemetry, TelemetryStreamClient
+
 
 def main(argv: list[str]) -> None:
-
     if len(argv) != 2:
-        print('Usage: python -m rover <server_address>')
+        print("Usage: python -m rover <server_address>")
         sys.exit(1)
 
     server_address = argv[1]
-    address = (server_address,MISSIONLINK_DEFAULT_PORT)
+    address = (server_address, MISSIONLINK_DEFAULT_PORT)
 
     missionLink = MissionLink(gethostname())
-    missionLink_thread = Thread(target=missionLink.start,args=(address,),daemon=False)
+    missionLink_thread = Thread(target=missionLink.start, args=(address,), daemon=False)
     missionLink_thread.start()
 
     time.sleep(5)
@@ -33,19 +34,34 @@ def main(argv: list[str]) -> None:
     for mission in missionLink.received_missions:
         print(mission)
 
-    missions = missionLink.received_missions.copy()
+    missions = missionLink.received_missions
 
     telemetry_client = TelemetryStreamClient(
         server_ip=server_address,
         server_port=TELEMETRY_DFAULT_PORT,
         rover_id=rover_id,
-        missions=missions
+        missions=missions,
     )
+
+    def shutdown_server(signal_received, frame):
+        print("Shutting down server...")
+        telemetry_client.stop()  # Close the socket
+        sys.exit(0)
+
+    # Catch SIGINT (Ctrl+C)
+    signal.signal(signal.SIGINT, shutdown_server)
+
     telemetry_thread = Thread(target=telemetry_client.start, daemon=True)
     telemetry_thread.start()
 
-    missionLink_thread.join()
-    telem_thread.join()
+    while True:
+        telemetry_client.mission_trigger_event.wait()
+        missionLink.request_mission(address)
+        telemetry_client.mission_trigger_event.clear()
 
-if __name__ == '__main__':
+    missionLink_thread.join()
+    telemetry_thread.join()
+
+
+if __name__ == "__main__":
     main(sys.argv)

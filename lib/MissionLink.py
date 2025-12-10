@@ -1,23 +1,29 @@
 # UDP layered protocol
 
 import socket
-import time
 import threading
+import time
 from collections import deque
 from threading import Condition, Thread
 from typing import Optional
+
+from lib.structs import RequestMission
 
 from .logging import log
 from .MissionLinkConnection import MissionLinkConnection, MissionLinkConnectionException
 from .structs.ACK import Ack
 from .structs.EndConnection import EndConnection
+from .structs.EndConnectionResponse import EndConnectionResponse
 from .structs.Mission import Mission
 from .structs.Packet import Packet, PacketType
 from .structs.RegisterRover import RegisterRover
 from .structs.RegisterRoverResponse import RegisterRoverResponse
+from .structs.RequestMission import RequestMission
+
 
 class MissionLinkRuntimeException(Exception):
     pass
+
 
 class MissionLink:
     def __init__(self, host: str, port: Optional[int] = None):
@@ -39,8 +45,9 @@ class MissionLink:
 
         self.__missions_to_send: deque[Mission] = deque()
         self.__missions_being_done: dict[str, Mission] = {}
+        self._max_missions = 3
 
-        self._received_missions: list[Mission] = [] # Rover missions
+        self._received_missions: list[Mission] = []  # Rover missions
         self._id_assigned_event = threading.Event()
 
         # Current active connections with rovers (str): rover ip
@@ -49,12 +56,9 @@ class MissionLink:
 
         self.__condition = Condition()
 
-        self.__next_rover_id = 1                  # rover id counter
-        self._rover_id: Optional[str] = None      # Only on rover
+        self.__next_rover_id = 1  # rover id counter
+        self._rover_id: Optional[str] = None  # Only on rover
         self._missions_assigned_event = threading.Event()
-
-        self._total_sent_missions = 0
-        self._max_missions = 3
 
     def start(
         self,
@@ -126,6 +130,9 @@ class MissionLink:
             case PacketType.Ack:
                 return Ack.deserialize(data)
 
+            case PacketType.RequestMission:
+                return RequestMission.deserialize(data)
+
             case PacketType.EndConnection:
                 return EndConnection.deserialize(data)
 
@@ -161,35 +168,48 @@ class MissionLink:
                     rover_id = f"rover_{self.__next_rover_id}"
                     self.__next_rover_id += 1
                     log(f"Assigned ID {rover_id} to {host}")
-                    # CHANGED: Only create connection and start thread for NEW connections
+
                     connection = self.__connections[host] = MissionLinkConnection(host)
                     connection.start_retransmission_thread(
                         self.__socket, client_address
                     )
 
-                # Get existing connection (just created or already exists)
                 connection = self.__connections[host]
                 rover_id = f"rover_{self.__next_rover_id - 1}"
-                response = connection.handle_sendable_register_response(received_packet, rover_id)
+                response = connection.handle_sendable_register_response(
+                    received_packet, rover_id
+                )
                 connection.add_packet_to_send(response)
 
-                message = f"Server confirms connection with {host}:{port} (ID: {rover_id})"
+                message = (
+                    f"Server confirms connection with {host}:{port} (ID: {rover_id})"
+                )
 
-
-            else: 
+            else:
                 connection = self.__connections[host]
 
-                if (isinstance(received_packet, EndConnection) or not(connection.running)):
-                    ack = connection.handle_sendable_ack(received_packet)
-                    connection.add_packet_to_send(ack)
+                if isinstance(received_packet, EndConnection) or not (
+                    connection.running
+                ):
+                    fynack = connection.handle_sendable_end_connection_response(
+                        received_packet
+                    )
+                    connection.add_packet_to_send(fynack)
 
                     connection.stop_retransmission_thread()
                     del self.__connections[host]
 
-                    message = f"Ending Connection with {host}:{port}"
+                    message = "[MISSION LINK] Ending MissionLink Connection with server"
+
+                elif isinstance(received_packet, EndConnectionResponse) or not (
+                    connection.running
+                ):
+                    connection.stop_retransmission_thread()
+                    del self.__connections[host]
+
+                    message = f"[MISSION LINK] Ending Connection with {host}:{port}"
 
                 elif isinstance(received_packet, RegisterRoverResponse):
-
                     # Saves the rover id assigned by the server
                     self._rover_id = received_packet.rover_id
                     self._id_assigned_event.set()  # signal that ID is assigned
@@ -200,26 +220,51 @@ class MissionLink:
                     message = f"Sending Ack={ack.sequence_number} to {host}:{port}"
 
                 elif isinstance(received_packet, Ack):
-
                     try:
                         connection.handle_received_ack(received_packet)
 
-                        if (not connection.has_mission) and self.__missions_to_send and self._total_sent_missions < self._max_missions:
+                        if (
+                            self.__missions_to_send
+                            and connection.total_sent_missions < self._max_missions
+                        ):
                             mission = self.__missions_to_send.popleft()
                             self.__missions_being_done[host] = mission
-                            self._total_sent_missions += 1 
+                            connection.increment_total_sent_mission()
                             seq, ack = connection.update_seq_ack_number(received_packet)
 
-                            packet = Packet(PacketType.Mission, seq, ack, mission.serialize())
+                            packet = Packet(
+                                PacketType.Mission, seq, ack, mission.serialize()
+                            )
                             connection.add_packet_to_send(packet)
-                            connection.set_has_mission(True)
 
                             message = f"Received Ack={received_packet.sequence_number} from {host}:{port}; Sending Seq={packet.sequence_number} to {host}:{port}"
                         else:
                             message = f"Received Ack={received_packet.sequence_number} from {host}:{port}"
-                    except KeyError:
-                        message = f"[ERROR] Received packet from unknown host: {host}:{port}"
 
+                    except KeyError:
+                        message = (
+                            f"[ERROR] Received packet from unknown host: {host}:{port}"
+                        )
+
+                elif isinstance(received_packet, RequestMission):
+                    if self.__missions_to_send:
+                        mission = self.__missions_to_send.popleft()
+                        self.__missions_being_done[host] = mission
+                        seq, ack = connection.update_seq_ack_number(received_packet)
+
+                        packet = Packet(
+                            PacketType.Mission, seq, ack, mission.serialize()
+                        )
+                        connection.add_packet_to_send(packet)
+
+                        message = f"Received RequestMission={received_packet.sequence_number} from {host}:{port}; Sending Seq={packet.sequence_number} to {host}:{port}"
+                    else:
+                        seq, ack = connection.update_seq_ack_number(received_packet)
+
+                        packet = EndConnection(seq, ack)
+                        connection.add_packet_to_send(packet)
+
+                        message = f"No more missions to send, Ending Connection with {host}:{port}"
 
                 elif isinstance(received_packet, Packet):
                     mission_body = received_packet.body
@@ -227,12 +272,11 @@ class MissionLink:
                     if mission_body:
                         mission = Mission.deserialize(mission_body)
                         self._received_missions.append(mission)
-                        self._missions_assigned_event.set() 
+                        self._missions_assigned_event.set()
                         log(f"Received mission: {mission}", "INFO")
-                    
+
                     ack = connection.handle_sendable_ack(received_packet)
                     connection.add_packet_to_send(ack)
-                    #connection.set_has_mission(False)
 
                     message = f"Sending Ack={ack.sequence_number} to {host}:{port}"
 
@@ -267,7 +311,9 @@ class MissionLink:
                 host, _ = address
                 connection = self.__connections[host]
                 for packet in packets:
-                    self.send_packet(packet.serialize(), packet.ack_number, address, connection)
+                    self.send_packet(
+                        packet.serialize(), packet.ack_number, address, connection
+                    )
 
                     if self.__is_server:
                         connection.add_sent_not_acked(packet.ack_number, packet)
@@ -296,11 +342,26 @@ class MissionLink:
         if missions:
             for mission in missions:
                 self.__missions_to_send.append(mission)
-    
+
+    def request_mission(self, server_address: tuple[str, int]):
+        host, port = server_address
+        try:
+            connection = self.__connections[host]
+
+            seq = connection.next_sequence_number
+            packet = RequestMission(seq, seq + 1)
+            connection.add_packet_to_send(packet)
+
+            packets = connection.get_sendable_packets()
+            self.send_packets(packets, server_address)
+            log("[MISSION LINK] Requesting new Mission...")
+        except KeyError:
+            log("[MISSION LINK] Server connection closed")
+
     @property
     def rover_id(self):
         return self._rover_id
-    
+
     @property
     def received_missions(self):
         return self._received_missions

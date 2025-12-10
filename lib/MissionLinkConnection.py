@@ -2,6 +2,8 @@ import threading
 import time
 from typing import Optional
 
+from lib.structs.EndConnectionResponse import EndConnectionResponse
+
 from .logging import log
 from .structs.ACK import Ack
 from .structs.EndConnection import EndConnection
@@ -24,20 +26,26 @@ class MissionLinkConnectionException:
 class MissionLinkConnection:
     def __init__(self, own_address: str):
         current_time = time.time()
-        
+
         self.__own_address = own_address
 
         # Incoming Data
-        self.__received_queue: dict[int, Packet] = {}           # Packets received but not yet processed: dict[sequence_number,Packet]
-        self.__last_known_other_alive = current_time            # Time of the last packet arriving
+        self.__received_queue: dict[
+            int, Packet
+        ] = {}  # Packets received but not yet processed: dict[sequence_number,Packet]
+        self.__last_known_other_alive = current_time  # Time of the last packet arriving
 
         # Outgoing Data
-        self.__sent_not_acknowledge: dict[int, Packet] = {}     # Packets sent waiting to be acknowledge (in window): dict[ack_number, Packet]
-        self.__not_sent: list[Packet] = []                      # Packets ready to be sent, wainting to enter window
-        self.__last_know_sent = current_time                    # Time of the last packet sent
+        self.__sent_not_acknowledge: dict[
+            int, Packet
+        ] = {}  # Packets sent waiting to be acknowledge (in window): dict[ack_number, Packet]
+        self.__not_sent: list[
+            Packet
+        ] = []  # Packets ready to be sent, wainting to enter window
+        self.__last_know_sent = current_time  # Time of the last packet sent
 
         # Flow Control
-        self.__sent_packets = 0                                 # Number of packets sent, waiting for ack response
+        self.__sent_packets = 0  # Number of packets sent, waiting for ack response
         self.__messages_removed_from_receive_queue = 0
 
         self.__has_mission: bool = False
@@ -49,9 +57,12 @@ class MissionLinkConnection:
         self.__send_times: dict[int, float] = {}
         self.__running = False
         self.__retransmission_thread = None
-        self.__maxR = 5                                         # Max number of retransmits for the host to stop retransmiting and ending connection
-        self.__curretnR = 0                                     # Current number of retransmits
+        self.__maxR = 5  # Max number of retransmits for the host to stop retransmiting and ending connection
+        self.__curretnR = 0  # Current number of retransmits
         self.__thread_lock = threading.Lock()
+
+        self._total_sent_missions = 0
+        self._next_sequence_number = 0
 
     def handle_received_ack(self, ack: Packet) -> bool:
         try:
@@ -67,7 +78,6 @@ class MissionLinkConnection:
 
                 self.update_rtt_estimates(sample_rtt)
 
-            self.set_has_mission(False) # keep sending missions
             return True
 
         except Exception as e:
@@ -82,11 +92,18 @@ class MissionLinkConnection:
 
     def handle_sendable_ack(self, response: Packet) -> "Ack":
         seq_number, ack_number = self.update_seq_ack_number(response)
+        self._next_sequence_number = ack_number
         return Ack(seq_number, ack_number)
 
     def handle_sendable_end_connection(self, response: Packet) -> "EndConnection":
         seq_number, ack_number = self.update_seq_ack_number(response)
         return EndConnection(seq_number, ack_number)
+
+    def handle_sendable_end_connection_response(
+        self, response: Packet
+    ) -> "EndConnectionResponse":
+        seq_number, ack_number = self.update_seq_ack_number(response)
+        return EndConnectionResponse(seq_number, ack_number)
 
     def get_sendable_packets(self) -> list[Packet]:
         ready_to_be_sent = []
@@ -198,13 +215,15 @@ class MissionLinkConnection:
                     )
 
                     if now - send_time > timeout:
-
                         self.__curretnR += 1
 
                         if self.__curretnR > self.__maxR:
                             self.__running = False
-                            log(f"Max retransmissions exceeded, ending connection with {client_address}", "END CONNECTION")
-                            break 
+                            log(
+                                f"Max retransmissions exceeded, ending connection with {client_address}",
+                                "END CONNECTION",
+                            )
+                            break
 
                         socket.sendto(packet.serialize(), client_address)
                         self.__send_times[ack_num] = time.time()
@@ -215,14 +234,16 @@ class MissionLinkConnection:
                             else INITIAL_TIMEOUT
                         )
 
-                        log(f"Packet Seq={packet.sequence_number} to {client_address}, timeout={timeout:.3f}s", "RETRANSMIT")
+                        log(
+                            f"Packet Seq={packet.sequence_number} to {client_address}, timeout={timeout:.3f}s",
+                            "RETRANSMIT",
+                        )
 
                 time.sleep(MINIMUM_TIMEOUT)
 
             except Exception as e:
                 print(f"[Retransmission error] {e}")
                 break
-
 
     def stop_retransmission_thread(self):
         """Signals the retransmission loop to exit cleanly."""
@@ -248,12 +269,16 @@ class MissionLinkConnection:
                 self.__rtt_stdev_estimate = INITIAL_TIMEOUT / 2
 
     @property
-    def has_mission(self):
-        return self.__has_mission
+    def total_sent_missions(self):
+        return self._total_sent_missions
 
     @property
     def sent_not_acknowledge(self):
         return self.__sent_not_acknowledge
+
+    @property
+    def next_sequence_number(self):
+        return self._next_sequence_number
 
     @property
     def running(self):
@@ -262,5 +287,5 @@ class MissionLinkConnection:
     def set_send_times(self, seq_number: int, time: float):
         self.__send_times[seq_number] = time
 
-    def set_has_mission(self, value: bool):
-        self.__has_mission = value
+    def increment_total_sent_mission(self):
+        self._total_sent_missions += 1

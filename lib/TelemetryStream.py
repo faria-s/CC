@@ -1,12 +1,18 @@
+import random
 import socket
 import threading
 import time
-import random
 from math import sqrt
+from threading import Event
+
+from mothership_server import (
+    Database,
+)
 
 from .logging import log
-from .structs.Telemetry import Telemetry, OperationalStatus
 from .structs.Mission import Mission
+from .structs.Telemetry import OperationalStatus, Telemetry
+
 
 class TelemetryStreamClient:
     """
@@ -14,7 +20,9 @@ class TelemetryStreamClient:
     Generates telemetry, moves toward mission targets, and sends updates automatically.
     """
 
-    def __init__(self, server_ip: str, server_port: int, rover_id: str, missions: list[Mission]):
+    def __init__(
+        self, server_ip: str, server_port: int, rover_id: str, missions: list[Mission]
+    ):
         """
         Args:
             server_ip: Telemetry server IP
@@ -22,6 +30,7 @@ class TelemetryStreamClient:
             rover_id: Rover identifier
             missions: List of missions to perform
         """
+        self.mission_trigger_event = Event()  # C
         self.server_ip = server_ip
         self.server_port = server_port
         self.rover_id = rover_id
@@ -36,18 +45,29 @@ class TelemetryStreamClient:
         self._telemetry_lock = threading.Lock()
 
     def start(self):
-        """
-        Connects to the Server
-        """
-        self.connect()
-        if not self.connected:
-            log("Cannot start telemetry loop — no connection.", "Error")
-            return
+        """Connect to the server and start the mission loop."""
+        try:
+            self.connect()
+            if not self.connected:
+                log(
+                    "[TELEMETRY CLIENT] Cannot start telemetry loop — no connection.",
+                    "Error",
+                )
+                return
 
-        log("[TELEMETRY CLIENT] Starting mission loop and telemetry sender...", "Info")
+            log("[TELEMETRY CLIENT] Starting mission loop...", "Info")
 
-        while not self._stop_event.is_set() and self.connected:
-            self._mission_loop()
+            while not self._stop_event.is_set() and self.connected:
+                try:
+                    self._mission_loop()
+                except Exception as e:
+                    log(f"[TELEMETRY CLIENT] Error in mission loop: {e}", "Error")
+                    self.connected = False
+                    self.stop()
+                    break
+
+        finally:
+            self.stop()
 
     def stop(self):
         """Stops loop and closes connection."""
@@ -61,7 +81,10 @@ class TelemetryStreamClient:
         try:
             self.socket.connect((self.server_ip, self.server_port))
             self.connected = True
-            log(f"[TELEMETRY CLIENT] Connected to {self.server_ip}:{self.server_port}", "Info")
+            log(
+                f"[TELEMETRY CLIENT] Connected to {self.server_ip}:{self.server_port}",
+                "Info",
+            )
         except Exception as e:
             log(f"[TELEMETRY CLIENT] Connection failed: {e}", "Error")
             self.connected = False
@@ -83,19 +106,20 @@ class TelemetryStreamClient:
         self._send_current_telemetry()
 
         # if finished then send final packet
-        if self.current_telemetry.get_operational_status == OperationalStatus.FINISHED:
+        if self.current_telemetry.operational_status == OperationalStatus.FINISHED:
             log(f"[ROVER] Mission {mission._mission_id} finished", "Info")
             self.current_mission_index += 1
-            return 
+            self.mission_trigger_event.set()
+            return
 
-        time.sleep(mission._report_time / 100) 
+        time.sleep(mission._report_time / 100)
 
     def _generate_initial_telemetry(self) -> Telemetry:
         """Generates a random initial telemetry at the start of a mission."""
         position = (
             random.uniform(0, 100),
             random.uniform(0, 100),
-            random.uniform(0, 10)
+            random.uniform(0, 10),
         )
         battery_level = 100.0
         velocity = random.uniform(0.5, 5.0)
@@ -104,7 +128,7 @@ class TelemetryStreamClient:
             position=position,
             battery_level=battery_level,
             velocity=velocity,
-            operational_status=OperationalStatus.DOING
+            operational_status=OperationalStatus.DOING,
         )
 
     def _update_telemetry_for_mission(self, mission: Mission):
@@ -112,7 +136,7 @@ class TelemetryStreamClient:
         if not self.current_telemetry:
             return
 
-        current_x, current_y, current_z = self.current_telemetry.get_position
+        current_x, current_y, current_z = self.current_telemetry.position
         target_x, target_y = mission._area[1]
 
         dx = target_x - current_x
@@ -123,20 +147,21 @@ class TelemetryStreamClient:
             new_position = (target_x, target_y, current_z)
             new_status = OperationalStatus.FINISHED
         else:
-            step_size = min(self.current_telemetry.get_velocity, distance)
+            step_size = min(self.current_telemetry.velocity, distance)
             new_x = current_x + dx / distance * step_size
             new_y = current_y + dy / distance * step_size
             new_position = (new_x, new_y, current_z)
             new_status = OperationalStatus.DOING
 
-        new_battery = max(0.0, self.current_telemetry.get_battery_level - 0.2)
+        new_battery = max(0.0, self.current_telemetry.battery_level - 0.2)
 
         updated_telemetry = Telemetry(
             rover_id=self.rover_id,
             position=new_position,
             battery_level=new_battery,
-            velocity=self.current_telemetry.get_velocity,
-            operational_status=new_status
+            velocity=self.current_telemetry.velocity,
+            mission_id=mission.mission_id,
+            operational_status=new_status,
         )
 
         with self._telemetry_lock:
@@ -159,11 +184,13 @@ class TelemetryStreamClient:
             self.connected = False
             self.socket.close()
 
+
 class TelemetryStreamServer:
     """
     A class to handle telemetry data streaming over a network socket.
     """
-    def __init__(self, address: str, port: int):
+
+    def __init__(self, address: str, port: int, database: Database):
         self.address = address
         self.port = port
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -171,34 +198,33 @@ class TelemetryStreamServer:
         self.client_threads = []
         self.telemetry_data: dict[str, Telemetry] = {}
         self.lock = threading.Lock()
+        self.database = database
 
     def start_stream(self):
-        """
-        Starts the telemetry TCP server.
-        For each accepted connection, a new thread is spawned to handle the rover's telemetry data.
-        """
-        self.socket.bind((self.address, self.port))
-        self.socket.listen(10) # max number of clients trying to connect
-        self.is_running = True
+        try:
+            self.socket.bind((self.address, self.port))
+            self.socket.listen(10)
+            self.is_running = True
+            log(f"[TELEMETRY SERVER] Listening on {self.address}:{self.port}", "Info")
 
-        log(f"[TELEMETRY SERVER] Listening on {self.address}:{self.port}", "Info")
-
-        while True:
-            try:
-                client_socket, client_address = self.socket.accept()
-                log(f"[TELEMETRY SERVER] Rover connected from {client_address}", "Info")
-                t = threading.Thread(
-                    target=self.__handle_client,
-                    args=(client_socket, client_address),
-                    daemon=True,
-                )
-                t.start()
-                self.client_threads.append(t)
-            except KeyboardInterrupt:
-                self.stop_server()
-
-            except Exception as e:
-                log(f"Error accepting connection: {e}.")
+            while self.is_running:
+                try:
+                    client_socket, client_address = self.socket.accept()
+                    log(
+                        f"[TELEMETRY SERVER] Rover connected from {client_address}",
+                        "Info",
+                    )
+                    t = threading.Thread(
+                        target=self.__handle_client,
+                        args=(client_socket, client_address),
+                        daemon=True,
+                    )
+                    t.start()
+                    self.client_threads.append(t)
+                except Exception as e:
+                    log(f"Error accepting connection: {e}")
+        finally:
+            self.stop_server()
 
     def __handle_client(self, client_sock, client_addr):
         """Receives telemetry data from the rover, deserializes it, and logs the information.
@@ -217,7 +243,10 @@ class TelemetryStreamServer:
                 # Read message size (first 4 bytes)
                 size_bytes = client_sock.recv(4)
                 if not size_bytes:
-                    log(f"[TELEMETRY SERVER] Rover {client_addr} disconnected.", "Warning")
+                    log(
+                        f"[TELEMETRY SERVER] Rover {client_addr} disconnected.",
+                        "Warning",
+                    )
                     return
 
                 size = int.from_bytes(size_bytes, "big")
@@ -226,9 +255,26 @@ class TelemetryStreamServer:
 
                 # Store latest telemetry
                 with self.lock:
-                    self.telemetry_data[telemetry.get_rover_id] = telemetry
+                    self.telemetry_data[telemetry.rover_id] = telemetry
+                    try:
+                        self.database.insert_telemetry(
+                            rover_id=telemetry.rover_id,
+                            position=telemetry.position,
+                            battery_level=telemetry.battery_level,
+                            velocity=telemetry.velocity,
+                            operational_status=telemetry.operational_status.value,
+                            mission_id=telemetry.mission_id,
+                        )
+                    except Exception as e:
+                        log(
+                            f"[TELEMETRY SERVER] Failed to insert telemetry for {telemetry.rover_id}: {e}",
+                            "Error",
+                        )
 
-                log(f"[TELEMETRY SERVER] Received telemetry from Rover[{telemetry.get_rover_id}]: {telemetry}", "Info")
+                log(
+                    f"[TELEMETRY SERVER] Received telemetry from Rover[{telemetry.rover_id}]: {telemetry}",
+                    "Info",
+                )
 
         except KeyboardInterrupt:
             log("Server interrupted manually. Stopping.", "INFO")

@@ -29,6 +29,76 @@
       "task": "Mapeamento topográfico",
       "duration": 60,
       "report_time": 300
+    },
+    {
+      "mission_id": "M-004",
+      "area": {
+        "coordinates_start": "(36.40, -8.90)",
+        "coordinates_end": "(36.90, -8.30)"
+      },
+      "task": "Vigilância ambiental",
+      "duration": 50,
+      "report_time": 240
+    },
+    {
+      "mission_id": "M-005",
+      "area": {
+        "coordinates_start": "(41.10, -7.80)",
+        "coordinates_end": "(41.60, -7.20)"
+      },
+      "task": "Deteção de incêndios",
+      "duration": 70,
+      "report_time": 360
+    },
+    {
+      "mission_id": "M-006",
+      "area": {
+        "coordinates_start": "(37.20, -9.30)",
+        "coordinates_end": "(37.80, -8.70)"
+      },
+      "task": "Análise da vegetação",
+      "duration": 55,
+      "report_time": 210
+    },
+    {
+      "mission_id": "M-007",
+      "area": {
+        "coordinates_start": "(39.50, -8.40)",
+        "coordinates_end": "(40.00, -7.90)"
+      },
+      "task": "Reconhecimento de terreno",
+      "duration": 40,
+      "report_time": 150
+    },
+    {
+      "mission_id": "M-008",
+      "area": {
+        "coordinates_start": "(42.00, -9.00)",
+        "coordinates_end": "(42.50, -8.50)"
+      },
+      "task": "Inspeção de infraestruturas",
+      "duration": 65,
+      "report_time": 300
+    },
+    {
+      "mission_id": "M-009",
+      "area": {
+        "coordinates_start": "(35.80, -7.60)",
+        "coordinates_end": "(36.30, -7.10)"
+      },
+      "task": "Monitorização de tráfego",
+      "duration": 35,
+      "report_time": 120
+    },
+    {
+      "mission_id": "M-010",
+      "area": {
+        "coordinates_start": "(38.10, -8.20)",
+        "coordinates_end": "(38.60, -7.70)"
+      },
+      "task": "Levantamento fotogramétrico",
+      "duration": 80,
+      "report_time": 420
     }
   ]
 }
