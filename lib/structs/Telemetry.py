@@ -8,7 +8,7 @@ class OperationalStatus(Enum):
     ATTRIBUTED = 1
     DOING = 2
     FINISHED = 3
-
+    CHARGING = 4   
 
 class Telemetry:
     def __init__(
