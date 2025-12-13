@@ -13,7 +13,7 @@ from lib import (
 from .Database import Database
 from .Parser import Parser
 
-# from .ObservationAPI import run_api
+from .ObservationAPI import run_api
 
 SERVER_IP = "0.0.0.0"
 

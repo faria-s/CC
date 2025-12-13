@@ -18,11 +18,11 @@ from lib.structs.Telemetry import Telemetry, OperationalStatus
 def telemetry_to_dict(t: Telemetry) -> dict[str, Any]:
     """Converte um objeto Telemetry num dicionário JSON-friendly."""
     return {
-        "rover_id": t.get_rover_id,
-        "position": list(t.get_position),       
-        "battery_level": t.get_battery_level,
-        "velocity": t.get_velocity,
-        "operational_status": t.get_operational_status.name,
+        "rover_id": t.rover_id,
+        "position": list(t.position),
+        "battery_level": t.battery_level,
+        "velocity": t.velocity,
+        "operational_status": t.operational_status.name,
     }
 
 
@@ -102,7 +102,7 @@ def create_app(database, telemetry_server) -> Flask:
                     rovers.append(
                         {
                             "rover_id": rover_id,
-                            "status": t.get_operational_status.name,
+                            "status": t.operational_status.name,
                             "last_telemetry": telemetry_to_dict(t),
                         }
                     )
