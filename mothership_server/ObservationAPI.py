@@ -10,6 +10,9 @@ from lib.structs.Telemetry import Telemetry, OperationalStatus
 #curl http://10.0.2.15:8000/telemetry/latest
 #curl http://10.0.2.15:8000/health
 
+#python -m ground_control 10.0.6.20 8000 --dashboard --show-missions
+
+
 # Tipos esperados:
 # - database: instância de mothership-server/Database.Database
 # - telemetry_server: instância de lib.TelemetryStream.TelemetryStreamServer
@@ -19,6 +22,7 @@ def telemetry_to_dict(t: Telemetry) -> dict[str, Any]:
     """Converte um objeto Telemetry num dicionário JSON-friendly."""
     return {
         "rover_id": t.rover_id,
+        "mission_id": t.mission_id,
         "position": list(t.position),
         "battery_level": t.battery_level,
         "velocity": t.velocity,

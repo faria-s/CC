@@ -1,38 +1,107 @@
 import sys
 import time
 import json
+import argparse
 import urllib.request
 import urllib.error
+from dataclasses import dataclass, field
+from typing import Any
 
 
-REFRESH_INTERVAL = 3  # segundos
+# ───────────────────────────────────────────────────────────────
+# Helpers HTTP
+# ───────────────────────────────────────────────────────────────
 
-#python3.14 -m ground_control 10.0.2.15
-
-def fetch_json(url: str):
-    """Faz um GET ao URL e devolve JSON (ou None se falhar)"""
+def fetch_json(url: str, timeout: float = 2.0) -> dict[str, Any] | None:
+    """Faz GET a um URL e devolve JSON (dict) ou None se falhar."""
     try:
-        with urllib.request.urlopen(url, timeout=2) as resp:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
             data = resp.read().decode("utf-8")
             return json.loads(data)
     except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError) as e:
-        print(f"[GroundControl] Erro ao pedir {url}: {e}")
         return None
 
 
-# ---------- MISSÕES (diff) ----------
+# ───────────────────────────────────────────────────────────────
+# Estado local (para diff / offline / alertas)
+# ───────────────────────────────────────────────────────────────
 
-def build_missions_state(missions_json: list[dict]) -> dict:
-    """
-    Constrói um dicionário simples com o estado relevante de cada missão,
-    indexado por mission_id, para podermos comparar com o anterior.
-    """
-    state = {}
+@dataclass
+class RoverSnapshot:
+    status: str | None = None
+    mission_id: str | None = None 
+    position: list[float] | None = None
+    battery_level: float | None = None
+    velocity: float | None = None
+    last_seen_ts: float = 0.0
+    missing_count: int = 0
+
+
+@dataclass
+class GCState:
+    rovers: dict[str, RoverSnapshot] = field(default_factory=dict)
+    missions_state: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+
+# ───────────────────────────────────────────────────────────────
+# Formatação (dashboard)
+# ───────────────────────────────────────────────────────────────
+
+def clear_screen() -> None:
+    # ANSI clear + home (funciona bem no terminal)
+    print("\033[2J\033[H", end="")
+
+
+def fmt_float(x: Any, nd: int = 2) -> str:
+    try:
+        return f"{float(x):.{nd}f}"
+    except Exception:
+        return "?"
+
+
+def fmt_pos(pos: Any) -> str:
+    if not isinstance(pos, list) or len(pos) < 2:
+        return "?"
+    if len(pos) == 2:
+        return f"({fmt_float(pos[0])},{fmt_float(pos[1])})"
+    return f"({fmt_float(pos[0])},{fmt_float(pos[1])},{fmt_float(pos[2])})"
+
+
+def now_str() -> str:
+    return time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+# ───────────────────────────────────────────────────────────────
+# Leitura da API
+# ───────────────────────────────────────────────────────────────
+
+def get_missions(base_url: str) -> list[dict[str, Any]] | None:
+    data = fetch_json(f"{base_url}/missions")
+    if not data:
+        return None
+    missions = data.get("missions", [])
+    return missions if isinstance(missions, list) else None
+
+
+def get_rovers(base_url: str) -> list[dict[str, Any]] | None:
+    data = fetch_json(f"{base_url}/rovers")
+    if not data:
+        return None
+    rovers = data.get("rovers", [])
+    return rovers if isinstance(rovers, list) else None
+
+
+# ───────────────────────────────────────────────────────────────
+# Diff (missões)
+# ───────────────────────────────────────────────────────────────
+
+def build_missions_state(missions_json: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    state: dict[str, dict[str, Any]] = {}
     for m in missions_json:
         mid = m.get("mission_id")
-        if mid is None:
+        if not mid:
             continue
-        state[mid] = {
+        state[str(mid)] = {
             "task": m.get("task"),
             "state": m.get("state"),
             "duration": m.get("duration"),
@@ -42,142 +111,252 @@ def build_missions_state(missions_json: list[dict]) -> dict:
     return state
 
 
-def print_missions_diff(base_url: str, prev_state: dict) -> dict:
-    """ Pede /missions, compara com o estado anterior e só imprime as alterações """
-    url = f"{base_url}/missions"
-    data = fetch_json(url)
-    if not data:
-        print("Não foi possível obter /missions.\n")
-        return prev_state
+def missions_changes(prev: dict[str, dict[str, Any]], new: dict[str, dict[str, Any]]) -> list[str]:
+    out: list[str] = []
 
-    missions = data.get("missions", [])
-    new_state = build_missions_state(missions)
+    # Novas / alteradas
+    for mid, st in new.items():
+        if mid not in prev:
+            out.append(f"+ missão {mid} criada (estado={st.get('state')}, tarefa={st.get('task')})")
+        else:
+            if prev[mid] != st:
+                # mostrar só campos que mudaram
+                diffs = []
+                for k in ("state", "task", "duration", "report_time", "area"):
+                    if prev[mid].get(k) != st.get(k):
+                        diffs.append(f"{k}: {prev[mid].get(k)} -> {st.get(k)}")
+                out.append(f"~ missão {mid} atualizada | " + ", ".join(diffs))
 
-    if not new_state and not prev_state:
-        return new_state
+    # Removidas
+    for mid in prev.keys():
+        if mid not in new:
+            out.append(f"- missão {mid} removida")
 
-    changes = []
-    # Missões novas ou alteradas
-    for mid, st in new_state.items():
-        if mid not in prev_state or prev_state[mid] != st:
-            changes.append((mid, st))
-
-    # Missões que desapareceram
-    removed = [mid for mid in prev_state.keys() if mid not in new_state]
-
-    if not changes and not removed:
-        # Nada mudou → não imprimir
-        return new_state
-
-    print("=== MISSÕES (alterações) ===")
-    for mid, st in changes:
-        print(
-            f"- {mid} | tarefa={st['task']} | estado={st['state']} | "
-            f"dur={st['duration']}s | report={st['report_time']}s | area={st['area']}"
-        )
-    for mid in removed:
-        print(f"- {mid} foi removida")
-
-    print()
-    return new_state
+    return out
 
 
-# ---------- ROVERS (diff) ----------
+# ───────────────────────────────────────────────────────────────
+# Atualização de estado rovers + alertas
+# ───────────────────────────────────────────────────────────────
 
-def build_rover_state(rovers_json: list[dict]) -> dict:
+def update_rovers_state(
+    state: GCState,
+    rovers_json: list[dict[str, Any]],
+    offline_after: int,
+) -> tuple[list[str], list[str]]:
     """
-    Constrói um dicionário simples com o estado relevante de cada rover,
-    para podermos comparar com o anterior.
+    Atualiza state.rovers.
+    Devolve (changes, alerts).
     """
-    state = {}
+    ts = time.time()
+    changes: list[str] = []
+    alerts: list[str] = []
+
+    seen: set[str] = set()
+
     for r in rovers_json:
-        rover_id = r.get("rover_id")
-        if rover_id is None:
+        rid = r.get("rover_id")
+        if not rid:
             continue
+        rid = str(rid)
+        seen.add(rid)
+
+        last = r.get("last_telemetry") or {}
         status = r.get("status")
-        last = r.get("last_telemetry", {}) or {}
+        pos = last.get("position")
+        bat = last.get("battery_level")
+        vel = last.get("velocity")
 
-        state[rover_id] = {
-            "status": status,
-            "position": last.get("position"),
-            "battery_level": last.get("battery_level"),
-            "velocity": last.get("velocity"),
-        }
-    return state
+        snap = state.rovers.get(rid)
+        if snap is None:
+            snap = RoverSnapshot()
+            state.rovers[rid] = snap
+            changes.append(f"+ rover {rid} entrou (status={status})")
+
+        # diffs “úteis”
+        if snap.status != status:
+            changes.append(f"~ rover {rid} status: {snap.status} -> {status}")
+        if snap.battery_level is not None and bat is not None:
+            try:
+                if float(bat) < float(snap.battery_level):
+                    # só registar queda se for “visível”
+                    delta = float(snap.battery_level) - float(bat)
+                    if delta >= 1.0:
+                        changes.append(f"~ rover {rid} bateria: {fmt_float(snap.battery_level)} -> {fmt_float(bat)} (-{fmt_float(delta)})")
+            except Exception:
+                pass
+
+        # aplicar valores
+        snap.status = status
+        snap.position = pos if isinstance(pos, list) else snap.position
+        try:
+            snap.battery_level = float(bat) if bat is not None else snap.battery_level
+        except Exception:
+            pass
+        try:
+            snap.velocity = float(vel) if vel is not None else snap.velocity
+        except Exception:
+            pass
+
+        snap.last_seen_ts = ts
+        snap.missing_count = 0
+
+        # alertas
+        if snap.battery_level is not None and snap.battery_level <= 20:
+            alerts.append(f"! ALERTA bateria baixa: {rid} = {fmt_float(snap.battery_level)}%")
+
+    # marcar ausentes (offline)
+    for rid, snap in state.rovers.items():
+        if rid not in seen:
+            snap.missing_count += 1
+            if snap.missing_count == offline_after:
+                changes.append(f"- rover {rid} ficou OFFLINE (sem dados há {offline_after} ciclos)")
+                alerts.append(f"! ALERTA rover offline: {rid}")
+
+    return changes, alerts
 
 
-def print_rovers_diff(base_url: str, prev_state: dict) -> dict:
-    """ Pede /rovers, compara com o estado anterior e só imprime as alterações """
-    url = f"{base_url}/rovers"
-    data = fetch_json(url)
-    if not data:
-        print("Não foi possível obter /rovers.\n")
-        return prev_state
+# ───────────────────────────────────────────────────────────────
+# Render dashboard
+# ───────────────────────────────────────────────────────────────
 
-    rovers = data.get("rovers", [])
-    new_state = build_rover_state(rovers)
+def render_dashboard(
+    base_url: str,
+    state: GCState,
+    last_errors: list[str],
+    show_missions: bool,
+) -> None:
+    clear_screen()
+    print(f"Ground Control @ {now_str()}")
+    print(f"API: {base_url}")
+    print()
 
-    if not new_state and not prev_state:
-        return new_state
+    if last_errors:
+        print("ERROS (mais recentes):")
+        for e in last_errors[-3:]:
+            print(f"  - {e}")
+        print()
 
-    changes = []
-    for rover_id, st in new_state.items():
-        if rover_id not in prev_state or prev_state[rover_id] != st:
-            changes.append((rover_id, st))
+        # Rovers table
+    print("ROVERS")
+    print(f"{'rover_id':<10} {'status':<10} {'mission':<10} {'battery':>8} {'velocity':>9} {'position'}")
+    print("-" * 70)
 
-    removed = [rid for rid in prev_state.keys() if rid not in new_state]
+    if not state.rovers:
+        print("(sem rovers ativos)")
+    else:
+        for rover_id, r in state.rovers.items():
+            status = r.status or "?"
+            mission = r.mission_id or "-"
+            bat = r.battery_level
+            vel = r.velocity
+            pos = r.position
 
-    if not changes and not removed:
-        return new_state
+            bat_str = f"{bat:.2f}%" if isinstance(bat, (int, float)) else "-"
+            vel_str = f"{vel:.2f}" if isinstance(vel, (int, float)) else "-"
+            pos_str = str(tuple(pos)) if isinstance(pos, (list, tuple)) else "-"
 
-    print("=== ROVERS / TELEMETRIA (alterações) ===")
-    for rover_id, st in changes:
-        pos = st["position"]
-        bat = st["battery_level"]
-        vel = st["velocity"]
-        status = st["status"]
-        print(
-            f"- {rover_id} | estado={status} | "
-            f"pos={pos} | bat={bat}% | vel={vel} m/s"
-        )
+            print(f"{rover_id:<10} {status:<10} {mission:<10} {bat_str:>8} {vel_str:>9} {pos_str}")
 
-    for rover_id in removed:
-        print(f"- {rover_id} deixou de estar ativo")
 
     print()
-    return new_state
 
 
-# ---------- MAIN ----------
+    # Missions summary (opcional)
+    if show_missions:
+        print("MISSÕES (lista)")
+        print("mission_id   state         task")
+        print("----------   ----------    ------------------------------")
+
+        if not state.missions_state:
+            print("(sem dados)\n")
+        else:
+            # ordena por número (M-001, M-002, ...)
+            def mission_sort_key(mid: str):
+                try:
+                    return int(mid.split("-")[1])
+                except Exception:
+                    return mid
+
+            for mid in sorted(state.missions_state.keys(), key=mission_sort_key):
+                st = state.missions_state[mid]
+                m_state = str(st.get("state", "?"))[:10].ljust(10)
+                task = str(st.get("task", "?"))[:30]
+                print(f"{mid.ljust(10)}   {m_state}    {task}")
+            print()
+
+
+# ───────────────────────────────────────────────────────────────
+# Main
+# ───────────────────────────────────────────────────────────────
 
 def main(argv: list[str]) -> None:
-    if len(argv) != 2 and len(argv) != 3:
-        print("Usage: python -m ground_control <mothership_host> [api_port]")
-        sys.exit(1)
+    p = argparse.ArgumentParser(prog="ground_control", add_help=True)
+    p.add_argument("mothership_host", help="IP/hostname da Mothership (ex: 10.0.6.20)")
+    p.add_argument("api_port", nargs="?", type=int, default=8000, help="Porta da API (default: 8000)")
+    p.add_argument("--refresh", type=float, default=2.0, help="Intervalo de refresh (s)")
+    p.add_argument("--dashboard", action="store_true", help="Mostra dashboard (limpa e redesenha)")
+    p.add_argument("--show-missions", action="store_true", help="Mostra resumo de missões no dashboard")
+    p.add_argument("--offline-after", type=int, default=3, help="Nº de ciclos sem dados para marcar OFFLINE")
+    p.add_argument("--quiet", action="store_true", help="Não imprimir diffs (apenas dashboard)")
+    args = p.parse_args(argv[1:])
 
-    host = argv[1]
-    port = int(argv[2]) if len(argv) == 3 else 8000
+    base_url = f"http://{args.mothership_host}:{args.api_port}"
 
-    base_url = f"http://{host}:{port}"
+    state = GCState()
+    last_errors: list[str] = []
 
-    print(f"Ground Control ligado à API em {base_url}")
-    print("CTRL+C para sair.\n")
-
-    # Teste rápido de /health
-    health = fetch_json(f"{base_url}/health")
-    if health:
-        print(f"API health: {health}\n")
+    # teste health
+    h = fetch_json(f"{base_url}/health")
+    if not h:
+        print(f"[GroundControl] Aviso: não consegui contactar {base_url}/health")
     else:
-        print("Aviso: não foi possível contactar /health.\n")
-
-    prev_missions_state: dict = {}
-    prev_rovers_state: dict = {}
+        print(f"[GroundControl] Ligado à API: {base_url} | health={h}")
 
     try:
         while True:
-            prev_missions_state = print_missions_diff(base_url, prev_missions_state)
-            prev_rovers_state = print_rovers_diff(base_url, prev_rovers_state)
-            time.sleep(REFRESH_INTERVAL)
+            # missões
+            missions = get_missions(base_url)
+            if missions is None:
+                last_errors.append("Falha ao obter /missions")
+            else:
+                new_m_state = build_missions_state(missions)
+                if not args.quiet and new_m_state:
+                    ch = missions_changes(state.missions_state, new_m_state)
+                    if ch and not args.dashboard:
+                        print("=== MISSÕES (alterações) ===")
+                        for line in ch:
+                            print(line)
+                        print()
+                state.missions_state = new_m_state
+
+            # rovers
+            rovers = get_rovers(base_url)
+            if rovers is None:
+                last_errors.append("Falha ao obter /rovers")
+            else:
+                changes, alerts = update_rovers_state(state, rovers, args.offline_after)
+
+                if args.dashboard:
+                    render_dashboard(base_url, state, last_errors, args.show_missions)
+                    if alerts:
+                        print("ALERTAS")
+                        for a in alerts[-10:]:
+                            print(" ", a)
+                        print()
+                else:
+                    if not args.quiet and (changes or alerts):
+                        print("=== ROVERS (alterações) ===")
+                        for c in changes:
+                            print(c)
+                        if alerts:
+                            print("--- ALERTAS ---")
+                            for a in alerts:
+                                print(a)
+                        print()
+
+            time.sleep(args.refresh)
+
     except KeyboardInterrupt:
         print("\nGround Control terminado.")
 
