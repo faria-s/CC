@@ -7,8 +7,11 @@ from lib.structs.Telemetry import Telemetry, OperationalStatus
 
 
 #curl http://10.0.2.15:8000/missions
-#curl http://10.0.2.15:8000/telemetry
+#curl http://10.0.2.15:8000/telemetry/latest
 #curl http://10.0.2.15:8000/health
+
+#python -m ground_control 10.0.6.20 8000 --dashboard --show-missions
+
 
 # Tipos esperados:
 # - database: instância de mothership-server/Database.Database
@@ -18,11 +21,12 @@ from lib.structs.Telemetry import Telemetry, OperationalStatus
 def telemetry_to_dict(t: Telemetry) -> dict[str, Any]:
     """Converte um objeto Telemetry num dicionário JSON-friendly."""
     return {
-        "rover_id": t.get_rover_id,
-        "position": list(t.get_position),       
-        "battery_level": t.get_battery_level,
-        "velocity": t.get_velocity,
-        "operational_status": t.get_operational_status.name,
+        "rover_id": t.rover_id,
+        "mission_id": t.mission_id,
+        "position": list(t.position),
+        "battery_level": t.battery_level,
+        "velocity": t.velocity,
+        "operational_status": t.operational_status.name,
     }
 
 
@@ -102,7 +106,7 @@ def create_app(database, telemetry_server) -> Flask:
                     rovers.append(
                         {
                             "rover_id": rover_id,
-                            "status": t.get_operational_status.name,
+                            "status": t.operational_status.name,
                             "last_telemetry": telemetry_to_dict(t),
                         }
                     )

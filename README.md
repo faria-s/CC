@@ -22,5 +22,6 @@ $ source .venv/bin/activate
 To run the server and the agent, run, respectively:
 
 ```
-$ python -m mothership-server <missions_json> <database>
+$ python -m mothership_server <missions_json> <database>
 $ python -m rover <server_ip>
+$ python -m ground_control <server_ip> [api_port]

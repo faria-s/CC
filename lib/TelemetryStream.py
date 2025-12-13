@@ -13,7 +13,6 @@ from .logging import log
 from .structs.Mission import Mission
 from .structs.Telemetry import OperationalStatus, Telemetry
 
-
 class TelemetryStreamClient:
     """
     A TCP client that handles telemetry sending for a rover.
@@ -34,9 +33,16 @@ class TelemetryStreamClient:
         self.server_ip = server_ip
         self.server_port = server_port
         self.rover_id = rover_id
-        self.missions = missions  # copy of the list
+        self.missions = missions
         self.current_mission_index = 0
+        self._mission_velocity: float | None = None # stores velocity once
         self.current_telemetry: Telemetry | None = None
+
+        self._is_charging = False
+        self._charge_step = 2.0        # % per cycle
+        self._charge_sleep = 1.0       # seconds
+        self._low_battery_threshold = 10.0
+        self._resume_battery_threshold = 30.0
 
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.connected = False
@@ -91,21 +97,29 @@ class TelemetryStreamClient:
 
     def _mission_loop(self):
         """Loop over missions and update telemetry towards mission goals."""
+
+        # no missions to do
         if self.current_mission_index >= len(self.missions):
-            return  # no more missions
+            return
 
         mission = self.missions[self.current_mission_index]
 
-        # generates its own telemetry once
+        # charging check
+        if self.current_telemetry and self._should_charge():
+            self._handle_charging()
+            self._send_current_telemetry()
+            time.sleep(self._charge_sleep)
+            return
+
+        # generate telemetry once
         if self.current_telemetry is None:
             self.current_telemetry = self._generate_initial_telemetry()
+            self._mission_velocity = self.current_telemetry.velocity
 
-        # given the mission updates its telemetry
         self._update_telemetry_for_mission(mission)
-
+        
         self._send_current_telemetry()
 
-        # if finished then send final packet
         if self.current_telemetry.operational_status == OperationalStatus.FINISHED:
             log(f"[ROVER] Mission {mission._mission_id} finished", "Info")
             self.current_mission_index += 1
@@ -153,7 +167,7 @@ class TelemetryStreamClient:
             new_position = (new_x, new_y, current_z)
             new_status = OperationalStatus.DOING
 
-        new_battery = max(0.0, self.current_telemetry.battery_level - 0.2)
+        new_battery = max(0.0, self.current_telemetry.battery_level - 5.0)
 
         updated_telemetry = Telemetry(
             rover_id=self.rover_id,
@@ -184,6 +198,39 @@ class TelemetryStreamClient:
             self.connected = False
             self.socket.close()
 
+    def _handle_charging(self):
+        self._is_charging = True
+
+        new_battery = min(
+            100.0,
+            self.current_telemetry.battery_level + self._charge_step
+        )
+
+        if new_battery >= self._resume_battery_threshold:
+            self._is_charging = False
+            status = OperationalStatus.DOING
+            velocity = self._mission_velocity
+        else:
+            status = OperationalStatus.CHARGING
+            velocity = 0.0
+
+        updated = Telemetry(
+            rover_id=self.rover_id,
+            position=self.current_telemetry.position,
+            battery_level=new_battery,
+            velocity=velocity,
+            mission_id=self.current_telemetry.mission_id,
+            operational_status=status
+        )
+
+        with self._telemetry_lock:
+            self.current_telemetry = updated
+
+    def _should_charge(self) -> bool:
+        return (
+            self.current_telemetry.battery_level <= self._low_battery_threshold
+            or self._is_charging
+        )
 
 class TelemetryStreamServer:
     """
@@ -252,6 +299,16 @@ class TelemetryStreamServer:
                 size = int.from_bytes(size_bytes, "big")
                 data = client_sock.recv(size, socket.MSG_WAITALL)
                 telemetry = Telemetry.deserialize(data)
+                if telemetry.mission_id is not None:
+                    try:
+                        # OperationalStatus enum: NOT_ATTRIBUTED/ATTRIBUTED/DOING/FINISHED
+                        self.database.update_mission_state(
+                            telemetry.mission_id,
+                            telemetry.operational_status.value
+                        )
+                    except Exception as e:
+                        log(f"[DB ERROR] Failed to update mission state: {e}", "Error")
+
 
                 # Store latest telemetry
                 with self.lock:
