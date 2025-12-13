@@ -7,7 +7,7 @@ from lib.structs.Telemetry import Telemetry, OperationalStatus
 
 
 #curl http://10.0.2.15:8000/missions
-#curl http://10.0.2.15:8000/telemetry
+#curl http://10.0.2.15:8000/telemetry/latest
 #curl http://10.0.2.15:8000/health
 
 # Tipos esperados:
