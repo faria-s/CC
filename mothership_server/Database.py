@@ -230,6 +230,15 @@ class Database:
         except sqlite3.Error as e:
             raise DatabaseException("Failed to fetch telemetry") from e
 
+
+    def update_mission_state(self, mission_id: str, state: int) -> None:
+        cursor = self.__connection.cursor()
+        cursor.execute(
+            "UPDATE missions SET state = ? WHERE mission_id = ?",
+            (state, mission_id),
+        )
+        self.__connection.commit()
+
     # ------------------------------------------------------------------
     # CLOSE
     # ------------------------------------------------------------------

@@ -252,6 +252,16 @@ class TelemetryStreamServer:
                 size = int.from_bytes(size_bytes, "big")
                 data = client_sock.recv(size, socket.MSG_WAITALL)
                 telemetry = Telemetry.deserialize(data)
+                if telemetry.mission_id is not None:
+                    try:
+                        # OperationalStatus enum: NOT_ATTRIBUTED/ATTRIBUTED/DOING/FINISHED
+                        self.database.update_mission_state(
+                            telemetry.mission_id,
+                            telemetry.operational_status.value
+                        )
+                    except Exception as e:
+                        log(f"[DB ERROR] Failed to update mission state: {e}", "Error")
+
 
                 # Store latest telemetry
                 with self.lock:
